@@ -33,5 +33,5 @@
 *
 
 !*.sh
-makefile
-Makefile
+!makefile
+!Makefile

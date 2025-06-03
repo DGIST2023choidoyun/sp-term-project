@@ -1,68 +1,117 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "led-matrix.h"
-#include "graphics.h"
+#include <unistd.h>  // sleep()
 
-#define CELL_SIZE 8
+#include "led-matrix-c.h"
 
-using namespace rgb_matrix;
+#define BOARD_SIZE 8
+#define MATRIX_SIZE 64
+#define CELL_PIXEL_W (MATRIX_SIZE / BOARD_SIZE)
+#define CELL_PIXEL_H (MATRIX_SIZE / BOARD_SIZE)
 
-int main(int argc, char *argv[]) {
-    RGBMatrix::Options defaults;
-    defaults.rows = 64;
-    defaults.cols = 64;
-    defaults.chain_length = 1;
-    defaults.parallel = 1;
+struct Color {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+};
 
-    RuntimeOptions runtime_opt;
-    RGBMatrix *matrix = CreateMatrixFromFlags(&argc, &argv, &defaults, &runtime_opt);
+static const struct Color COLOR_RED   = { 255, 0, 0 };
+static const struct Color COLOR_BLUE  = { 0, 0, 255 };
+static const struct Color COLOR_BLACK = { 0, 0, 0 };
+
+int main(void) {
+    struct RGBLedMatrixOptions options;
+    struct RGBLedRuntimeOptions rt_options;
+    struct RGBLedMatrix *matrix;
+    struct LedCanvas *canvas;
+
+    char board[BOARD_SIZE][BOARD_SIZE];
+    char line[64];
+
+    int i, j;
+
+    // 옵션 구조체 초기화
+    memset(&options, 0, sizeof(options));
+    memset(&rt_options, 0, sizeof(rt_options));
+
+    options.rows = MATRIX_SIZE;
+    options.cols = MATRIX_SIZE;
+    options.chain_length = 1;
+    options.parallel = 1;
+    options.brightness = 50;
+    options.hardware_mapping = "adafruit-hat";
+
+    rt_options.gpio_slowdown = 2;
+
+    // 매트릭스 초기화
+    matrix = led_matrix_create_from_options_and_rt_options(&options, &rt_options);
     if (matrix == NULL) {
-        fprintf(stderr, "Could not create matrix.\n");
+        fprintf(stderr, "ERROR: Failed to create matrix.\n");
         return 1;
     }
 
-    FrameCanvas *canvas = matrix->CreateFrameCanvas();
-
-    char board[8][9];  // 8줄 입력 받을 공간
-
-    // stdin에서 8줄 입력
-    for (int i = 0; i < 8; ++i) {
-        if (fgets(board[i], sizeof(board[i]), stdin) == NULL) {
-            fprintf(stderr, "Failed to read board line %d\n", i);
-            return 1;
-        }
-        // 줄바꿈 제거
-        size_t len = strlen(board[i]);
-        if (len > 0 && board[i][len - 1] == '\n') {
-            board[i][len - 1] = '\0';
-        }
+    canvas = led_matrix_get_canvas(matrix);
+    if (canvas == NULL) {
+        fprintf(stderr, "ERROR: Failed to get canvas.\n");
+        led_matrix_delete(matrix);
+        return 1;
     }
 
-    // 보드를 캔버스에 출력
-    for (int row = 0; row < 8; ++row) {
-        for (int col = 0; col < 8; ++col) {
-            int start_x = col * CELL_SIZE;
-            int start_y = row * CELL_SIZE;
-            uint8_t r = 0, g = 0, b = 0;
+    // 8줄 입력 받기
+    for (i = 0; i < BOARD_SIZE; ++i) {
+        if (fgets(line, sizeof(line), stdin) == NULL) {
+            fprintf(stderr, "ERROR: Failed to read line %d\n", i + 1);
+            led_matrix_delete(matrix);
+            return 1;
+        }
 
-            if (board[row][col] == 'R') {
-                r = 255;
-            } else if (board[row][col] == 'B') {
-                b = 255;
+        size_t len = strlen(line);
+        if (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';  // 줄바꿈 제거
+        }
+
+        if (len < BOARD_SIZE) {
+            fprintf(stderr, "ERROR: Line %d is too short (got %zu chars)\n", i + 1, len);
+            led_matrix_delete(matrix);
+            return 1;
+        }
+
+        memcpy(board[i], line, BOARD_SIZE);
+    }
+
+    // 보드 출력
+    led_canvas_clear(canvas);
+
+    for (i = 0; i < BOARD_SIZE; ++i) {
+        for (j = 0; j < BOARD_SIZE; ++j) {
+            const struct Color *color;
+            int x0 = j * CELL_PIXEL_W;
+            int y0 = i * CELL_PIXEL_H;
+            int dx, dy;
+
+            char ch = board[i][j];
+            if (ch == 'R') {
+                color = &COLOR_RED;
+            } else if (ch == 'B') {
+                color = &COLOR_BLUE;
+            } else {
+                color = &COLOR_BLACK;
             }
 
-            for (int dy = 0; dy < CELL_SIZE; ++dy) {
-                for (int dx = 0; dx < CELL_SIZE; ++dx) {
-                    canvas->SetPixel(start_x + dx, start_y + dy, r, g, b);
+            for (dy = 0; dy < CELL_PIXEL_H; ++dy) {
+                for (dx = 0; dx < CELL_PIXEL_W; ++dx) {
+                    led_canvas_set_pixel(canvas,
+                                         x0 + dx, y0 + dy,
+                                         color->r, color->g, color->b);
                 }
             }
         }
     }
 
-    canvas = matrix->SwapOnVSync(canvas);  // 출력
-
-    sleep(5);  // 5초간 유지 후 종료
-    delete matrix;
+    sleep(5);
+    led_matrix_delete(matrix);
     return 0;
 }

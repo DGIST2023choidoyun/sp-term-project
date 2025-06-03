@@ -44,6 +44,8 @@ int main(void) {
     options.brightness = 50;
     options.hardware_mapping = "adafruit-hat";
 
+    options.no_hardware_pulse = true;
+
     rt_options.gpio_slowdown = 2;
 
     // 매트릭스 초기화

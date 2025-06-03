@@ -17,8 +17,8 @@
 
 // 실제 연결된 LED 매트릭스 패널 해상도 및 체인 길이
 // 예시: 32×32 크기 패널 한 장만 연결된 경우
-#define MATRIX_ROWS      32
-#define MATRIX_COLS      32
+#define MATRIX_ROWS      64
+#define MATRIX_COLS      64
 #define CHAIN_LENGTH      1
 #define PARALLEL          1
 

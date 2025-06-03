@@ -1,72 +1,114 @@
+// simple_board_display.c
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "led-matrix-c.h"  // Use led-matrix-c.h as requested
 
-#include "board.h"         // extern char board[8][8];
-#include "led-matrix-c.h"  // LED 매트릭스 제어 함수들
-
-#define BOARD_H
-#define BOARD_SIZE 8
-extern char board[BOARD_SIZE][BOARD_SIZE];
-
-
+// Board and matrix dimensions
+static const int BOARD_SIZE  = 8;
+static const int MATRIX_SIZE = 64;             // Changed to 64×64
+static const int CELL_SIZE   = MATRIX_SIZE / BOARD_SIZE;  // 64/8 = 8
 
 int main(void) {
-    // 1) 표준 입력에서 8줄을 읽어서 board[8][8]에 저장
-    //    각 줄은 반드시 8글자(문자열)로 이루어져야 하며, 뒤에 '\n'이 따라올 수 있음.
-    char line[16];  // 최대 8글자 + 개행 + 널문자 여유 두고 선언
+    // 1) Initialize LED matrix
+    struct RGBLedMatrixOptions options;
+    struct RGBLedRuntimeOptions r_options;
+    memset(&options,  0, sizeof(options));
+    memset(&r_options, 0, sizeof(r_options));
+
+    // Example settings: 64×64 matrix, brightness 50, GPIO init enabled
+    options.rows         = MATRIX_SIZE;
+    options.cols         = MATRIX_SIZE;
+    options.chain_length = 1;
+    options.parallel     = 1;
+    options.brightness   = 50;
+    options.hardware_mapping = "adafruit-hat";
+
+    r_options.do_gpio_init = true;
+    r_options.gpio_slowdown = 2;
+
+    struct RGBLedMatrix *matrix =
+        led_matrix_create_from_options_and_rt_options(&options, &r_options);
+    if (!matrix) {
+        fprintf(stderr, "ERROR: LED matrix initialization failed\n");
+        return 1;
+    }
+    struct LedCanvas *canvas = led_matrix_get_canvas(matrix);
+    if (!canvas) {
+        fprintf(stderr, "ERROR: Failed to get canvas from LED matrix\n");
+        led_matrix_delete(matrix);
+        return 1;
+    }
+
+    // 2) Input buffers and board array
+    char line[16];
+    char board[BOARD_SIZE][BOARD_SIZE];
+
+    // 3) Read 8 lines from stdin into board[][]
     for (int row = 0; row < BOARD_SIZE; ++row) {
         if (fgets(line, sizeof(line), stdin) == NULL) {
-            fprintf(stderr, "입력 줄을 읽는 데 실패했습니다. (row=%d)\n", row);
-            return EXIT_FAILURE;
+            fprintf(stderr, "ERROR: Failed to read input line %d\n", row);
+            led_matrix_delete(matrix);
+            return 1;
         }
-        // 첫 8글자만 사용 ('.','R','B' 중 하나)
-        for (int col = 0; col < BOARD_SIZE; ++col) {
-            board[row][col] = line[col];
+        // Check at least 8 characters
+        if ((int)strlen(line) < BOARD_SIZE) {
+            fprintf(stderr, "ERROR: Line %d contains fewer than 8 characters\n", row);
+            led_matrix_delete(matrix);
+            return 1;
         }
+        // Copy first 8 characters into board[row][]
+        memcpy(board[row], line, BOARD_SIZE);
     }
 
-    // 2) 8×8 LED 매트릭스 초기화
-    struct LedMatrix* mtx = led_matrix_create(BOARD_SIZE, BOARD_SIZE);
-    if (mtx == NULL) {
-        fprintf(stderr, "LED 매트릭스 초기화 실패\n");
-        return EXIT_FAILURE;
-    }
+    // 4) Draw board onto the LED matrix
+    //    First clear the entire canvas to black
+    led_canvas_clear(canvas);
 
-    // 3) board[][] 값에 따라 색상을 지정해서 픽셀 세팅
-    //    board[row][col] == '.': 검정(0,0,0)
-    //                    'R': 빨강(255,0,0)
-    //                    'B': 파랑(0,0,255)
-    for (int row = 0; row < BOARD_SIZE; ++row) {
-        for (int col = 0; col < BOARD_SIZE; ++col) {
-            char ch = board[row][col];
-            switch (ch) {
-                case 'R':
-                    // 빨간색
-                    led_matrix_set_pixel(mtx, col, row, 255, 0, 0);
-                    break;
-                case 'B':
-                    // 파란색
-                    led_matrix_set_pixel(mtx, col, row, 0, 0, 255);
-                    break;
-                case '.':
-                default:
-                    // 검정(꺼짐)
-                    led_matrix_set_pixel(mtx, col, row, 0, 0, 0);
-                    break;
+    //    For each of the 8×8 cells, fill an 8×8 pixel block
+    for (int r = 0; r < BOARD_SIZE; ++r) {
+        for (int c = 0; c < BOARD_SIZE; ++c) {
+            unsigned char r_col = 0, g_col = 0, b_col = 0;
+            if (board[r][c] == 'R') {
+                r_col = 255;  // red
+            } else if (board[r][c] == 'B') {
+                b_col = 255;  // blue
+            }
+            // '.' or any other character remains black (0,0,0)
+
+            // Top-left pixel of this cell's block
+            int x0 = c * CELL_SIZE;
+            int y0 = r * CELL_SIZE;
+
+            // Fill an 8×8 pixel block with the chosen color
+            for (int dy = 0; dy < CELL_SIZE; ++dy) {
+                for (int dx = 0; dx < CELL_SIZE; ++dx) {
+                    led_canvas_set_pixel(canvas,
+                                         x0 + dx,
+                                         y0 + dy,
+                                         r_col, g_col, b_col);
+                }
             }
         }
     }
 
-    // 4) 버퍼에 채운 픽셀 정보를 LED 매트릭스에 한 번 전송
-    led_matrix_update(mtx);
+    // 5) Render the frame to the LED matrix
+    led_matrix_render_frame(canvas);
 
-    // (선택) 화면을 잠시 유지
+    // Print the board to terminal (debug)
+    for (int r = 0; r < BOARD_SIZE; ++r) {
+        for (int c = 0; c < BOARD_SIZE; ++c) {
+            putchar(board[r][c]);
+        }
+        putchar('\n');
+    }
+
+    // 6) Keep the result visible for 1 second (optional)
     sleep(1);
 
-    // 5) 매트릭스 리소스 해제
-    led_matrix_destroy(mtx);
-
-    return EXIT_SUCCESS;
+    // 7) Clean up and exit
+    led_matrix_delete(matrix);
+    return 0;
 }

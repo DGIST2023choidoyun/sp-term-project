@@ -6,6 +6,12 @@
 #include "board.h"         // extern char board[8][8];
 #include "led-matrix-c.h"  // LED 매트릭스 제어 함수들
 
+#define BOARD_H
+#define BOARD_SIZE 8
+extern char board[BOARD_SIZE][BOARD_SIZE];
+
+
+
 int main(void) {
     // 1) 표준 입력에서 8줄을 읽어서 board[8][8]에 저장
     //    각 줄은 반드시 8글자(문자열)로 이루어져야 하며, 뒤에 '\n'이 따라올 수 있음.

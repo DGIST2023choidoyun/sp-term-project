@@ -1,1 +1,0 @@
-gcc client.c board.c -o client -ljansson -DDEBUG

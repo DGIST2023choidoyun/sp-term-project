@@ -41,6 +41,8 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
+
 bool init_led_panel(void);
 
 void render(const char board[8][8]);

@@ -42,6 +42,8 @@ bool init_led_panel() {
     }
 
     led_canvas_clear(canvas);
+
+    return 1;
 }
 
 void deinit_led_matrix(void) {
@@ -87,7 +89,7 @@ int main(void) {
  
     char board[BOARD_SIZE][BOARD_SIZE];
     char line[64];
-
+    int i;
     // 8줄 입력 받기
     for (i = 0; i < BOARD_SIZE; ++i) {
         if (fgets(line, sizeof(line), stdin) == NULL) {

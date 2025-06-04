@@ -55,8 +55,6 @@
 #pragma region CONSTS
 #define TRUE                                    1
 #define FALSE                                   0
-#define true                                    TRUE
-#define false                                   FALSE
 #define PAYLOAD_BUFFER                          2048
 #define SIZE                                    8
 #pragma endregion
@@ -222,6 +220,8 @@ BOOL process(int sockfd, const char* username, STATUS* status) {
         tile board[SIZE][SIZE];
         const tile cur = is_first ? 'R' : 'B';
         const tile oppo = is_first ? 'B' : 'R';
+
+        init_led_panel();
         while (1) {
             int ready = poll(&server, 1, -1);
             if (ready < 0) {
@@ -376,11 +376,11 @@ Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile o
                 int nr = r2 + dr, nc = c2 + dc; // 이동한 칸 주변
                 // 이동한 칸 주변에 내 말이 많고 상대가 그 곳에 말을 두었을 때, 내 말이 많이 뺏기는 칸인지 확인
                 if (!IN_BOARD(nr, nc)) continue;
-                BOOL found = false;
+                BOOL found = FALSE;
                 for (int k = 0; k < valid_moves_cnt_opp; k++) {
                     Move* opp_move = &opp_valid_moves[k];
                     if (opp_move->r2 == nr && opp_move->c2 == nc) {
-                        found = true;
+                        found = TRUE;
                         break;
                     }
                 }

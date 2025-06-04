@@ -26,7 +26,7 @@ bool init_led_panel() {
     options.cols = MATRIX_SIZE;
     options.chain_length = 1;
 
-    options.no_hardware_pulse = true;
+    options.disable_hardware_pulsing = true;
 
     matrix = led_matrix_create_from_options(&options, NULL, NULL);
     if (matrix == NULL) {
@@ -42,6 +42,10 @@ bool init_led_panel() {
     }
 
     led_canvas_clear(canvas);
+}
+
+void deinit_led_matrix(void) {
+    // TODO
 }
 
 void render(const char board[BOARD_SIZE][BOARD_SIZE]) {

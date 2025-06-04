@@ -309,7 +309,7 @@ BOOL process(int sockfd, const char* username, STATUS* status) {
     return TRUE; // normal exit
 }
 Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile oppo) {
-    Move new_move = { .c1 = 0, .r1 = 0, .c2 = 0, .r2 = 0 };
+    Move new_move = { .r1 = 0, .c1 = 0, .r2 = 0, .c2 = 0 };
 
     // return new_move;
     Move* player_valid_moves = available_move_player(board, player);

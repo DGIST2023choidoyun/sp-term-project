@@ -35,3 +35,4 @@
 !*.sh
 !makefile
 !Makefile
+!led-matrix-c.h

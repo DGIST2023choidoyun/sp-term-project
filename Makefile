@@ -6,7 +6,7 @@ DEBUG_FLAGS   := -DDEBUG
 
 ASAN_FLAGS    := -g -O0 -fsanitize=address
 
-.PHONY: all release debug test run clean
+.PHONY: all release debug test run clean board run_board
 
 all: release
 
@@ -24,3 +24,8 @@ run:
 
 clean:
 	rm -f client
+
+board:
+	g++ -DSTANDALONE -I. -I./include -L./lib board.c -lpthread -lrgbmatrix -lrt -o board
+run_board:
+	sudo ./board

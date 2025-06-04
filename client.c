@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <signal.h>
 #include <time.h>
+#include <limits.h>
 #include <string.h>
+#include <math.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <poll.h>
@@ -32,7 +34,7 @@
 #define ERR(...)                                fprintf(stderr, __VA_ARGS__)
 
 #define SAME_STR(x, y)                          (x != NULL && y != NULL && !strcmp((x), (y)))
-#define IN_BOARD(x, y)   ((x) >= 0 && (x) < SIZE && (y) >= 0 && (y) < SIZE)
+#define IN_BOUNDS(x, y)   ((x) >= 0 && (x) < SIZE && (y) >= 0 && (y) < SIZE)
 
 #define __ALLOC_JSON_NEW(name, ...)             json name; __ALLOC_JSON(name, __VA_ARGS__)
 #define __ALLOC_JSON(name, ...)                 name.data = json_pack(__VA_ARGS__); name.ref = TRUE; if (name.data)
@@ -68,7 +70,15 @@ typedef struct {
     json_t*             data; // real json object
     BOOL                ref; // referred or not
 } json;
-typedef struct { int r1, c1, r2, c2; } Move;
+typedef struct Move {
+    int r1, c1;   // 출발 좌표 (0-based)
+    int r2, c2;   // 도착 좌표 (0-based)
+    char type;    // 'C' = Clone, 'J' = Jump
+} Move;
+typedef struct {
+    int idx;
+    int score;
+} ScoredMove;
 #pragma endregion
 
 Move valid_moves_player[1000];
@@ -90,6 +100,11 @@ BOOL process(int sockfd, const char* username, STATUS* status);
 Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile oppo);
 Move* available_move_player(const tile board[SIZE][SIZE], const tile player);
 Move* available_move_opp(const tile board[SIZE][SIZE], const tile player);
+void get_all_valid_moves(const tile board[SIZE][SIZE], char player, Move moves[], int *move_count);
+int  count_flipped(const tile board[SIZE][SIZE], Move m, char player);
+int is_corner_adjacent(int r, int c);
+int score_piece_count(const tile board[SIZE][SIZE], char player);
+void simulate_move(const tile src_board[SIZE][SIZE], Move m, char player, tile dest_board[SIZE][SIZE]);
 
 int send_stream(const int dst, char* data);
 json recv_stream(const int src);
@@ -98,10 +113,12 @@ char* build_payload(PAYLOAD, ...);
 char* stringfy(json*);
 json json_undefined();
 
+#ifndef CLIENT_ONLY
 void handle_signal(int signum) {
     deinit_led_matrix();
     exit(0);
 }
+#endif
 
 #pragma region MAIN
 int main(int argc, char* argv[]) {
@@ -117,8 +134,10 @@ int main(int argc, char* argv[]) {
     int socket;
     STATUS status;
 
-    signal(SIGINT, handle_signal);   // Ctrl+C
-    signal(SIGTERM, handle_signal);  // kill 명령 등
+    #ifndef CLIENT_ONLY
+        signal(SIGINT, handle_signal);   // Ctrl+C
+        signal(SIGTERM, handle_signal);  // kill 명령 등
+    #endif
 
     if (!set_network(ip, port, &socket, &status)) {
         ERR("[netset error]\n");
@@ -133,7 +152,9 @@ int main(int argc, char* argv[]) {
     }
     
     close(socket);
-    deinit_led_matrix();
+    #ifndef CLIENT_ONLY
+        deinit_led_matrix();
+    #endif
     return 0;
 }
 #pragma endregion
@@ -221,7 +242,9 @@ BOOL process(int sockfd, const char* username, STATUS* status) {
         const tile cur = is_first ? 'R' : 'B';
         const tile oppo = is_first ? 'B' : 'R';
 
-        init_led_panel();
+        #ifndef CLIENT_ONLY
+            init_led_panel();
+        #endif
         while (1) {
             int ready = poll(&server, 1, -1);
             if (ready < 0) {
@@ -311,204 +334,199 @@ BOOL process(int sockfd, const char* username, STATUS* status) {
 Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile oppo) {
     Move new_move = { .r1 = 0, .c1 = 0, .r2 = 0, .c2 = 0 };
 
-    // return new_move;
-    Move* player_valid_moves = available_move_player(board, player);
-    Move* opp_valid_moves = available_move_opp(board, oppo);
-    if (player_valid_moves == NULL) {
+    Move moves[1000];
+    int move_cnt = 0;
+    
+    // 1) 합법 수 모두 수집
+    get_all_valid_moves(board, player, moves, &move_cnt);
+
+    // 2) 둘 수 없으면 PASS
+    if (move_cnt == 0) {
         return new_move;
     }
 
-
-    // 후보 중 최대의 효율을 가지는 수 찾기
-    // 전략들 (추가 제거 가능)
-    // 현재 전략 : 1. 상대의 말을 많이 뒤집을 수 있는 수
-    //         2. 내 말을 알박기할 수 있고 상대의 말을 알박기하게 두지 않는 칸. (더 이상 뒤집힐 수 없는 칸) --(나중에 구현)
-    //         3. 상대가 행동할 때, 내가 둔 곳을 다시 차지할 위협이 적은 칸. (이동한 곳 주변에 내 말이 많고 상대가 그 곳에 말을 두었을 때, 내 말이 많이 뺏기는 칸) 설령 내 말을 뺏기더라도 다시 가져올 수 있으면 ㄱㅊ(주변 칸의 개수가 짝수일 경우)
-    //         4. 내 차례에 마지막 수를 둘 수 있는지(보드 전체의 남은 칸이 짝수이면 jump, 홀수이면 clone) -- 일단 배제
-    //         5. 추가적인 전략을 추가할 수 있고, 제거할 수도 있게 설계한다. (위 전략을 합쳐서 최적의 수를 도출하는 구조.)
-    Move best_move = {-1, -1, -1, -1};
-    int max_score = -1000;
-    int score[1000];
-    for (int i = 0; i < valid_moves_cnt_player; i++) {
-        score[i] = 0; // 초기화
+    ScoredMove scored[1000];
+    for (int i = 0; i < move_cnt; i++) {
+        Move m = moves[i];
+        int flips = count_flipped(board, m, player);
+        int corner_penalty = is_corner_adjacent(m.r2, m.c2) ? 1 : 0;
+        float dr = fabsf((float)m.r2 - 3.5f);
+        float dc = fabsf((float)m.c2 - 3.5f);
+        float dist_center = dr + dc;
+        int score = flips * 1000 - corner_penalty * 500 - (int)(dist_center * 10.0f);
+        scored[i].idx = i;
+        scored[i].score = score;
     }
-    for (int i = 0; i < valid_moves_cnt_player; i++) {
-    Move* m = &player_valid_moves[i];
-        int r1 = m->r1, c1 = m->c1, r2 = m->r2, c2 = m->c2;
 
-        // 이번 행동의 이동
-        int distance_r = abs(r2 - r1);
-        int distance_c = abs(c2 - c1);
-        int pres_move = -1; // 현재 이동 방식 (0 = clone, 1 = jump)
-
-        // 중앙집권체제
-        int center_score = 0;
-        center_score += 3.5 - abs(r2 - 3.5) + 3.5 - abs(c2 - 3.5); // 0~7점
-
-
-        if ((distance_r == 2 || distance_r == 0) && (distance_c == 2 || distance_c == 0)){
-            pres_move = 1; // jump 전략
-        }
-        else if (distance_r <= 1 && distance_c <= 1) {
-            pres_move = 0; // clone 전략
-        } else {
-            continue; // 유효하지 않은 이동은 무시
-        }
-
-        // 상대의 말을 많이 뒤집을 수 있는 수
-        int flips = 0;
-        for (int dr = -1; dr <= 1; dr++) {
-            for (int dc = -1; dc <= 1; dc++) {
-                if (dr == 0 && dc == 0) continue;
-                int nr = r2 + dr, nc = c2 + dc; // 이동한 칸 주변
-                if (!IN_BOARD(nr, nc)) continue;
-                if (board[nr][nc] == oppo) {
-                    flips++;
-                }
+    // 4) 1차 점수로 내림차순 정렬하여 상위 N개만 선정
+    int N = (move_cnt < 30 ? move_cnt : 30);
+    // 간단히 선택 정렬로 상위 N 추출 (move_cnt 최대 1000이므로 비용 무시)
+    for (int i = 0; i < N; i++) {
+        int best_j = i;
+        for (int j = i + 1; j < move_cnt; j++) {
+            if (scored[j].score > scored[best_j].score) {
+                best_j = j;
             }
         }
+        // swap
+        ScoredMove tmp = scored[i];
+        scored[i] = scored[best_j];
+        scored[best_j] = tmp;
+    }
+
+    // 5) 상위 N개 후보 각각에 대해 “단계 2” 시뮬레이션:
+    //    (A) 나의 후보 수를 보드에 적용 → b1
+    //    (B) 상대편의 그리디 수(move_generate 로직과 동일)를 b1에 적용 → b2
+    //    (C) b2에서의 score_piece_count(player) 계산 → 최종 평가
+    int best_idx = scored[0].idx;
+    int best_eval = INT_MIN;
+
+    for (int k = 0; k < N; k++) {
+        int i = scored[k].idx;
+        Move m = moves[i];
+
+        // (A) 내 수 적용
+        char board1[SIZE][SIZE];
+        simulate_move(board, m, player, board1);
+
+        // (B) 상대편 그리디 수 찾기
+        Move opp_moves[1000];
+        int opp_move_cnt = 0;
+        get_all_valid_moves(board1, oppo, opp_moves, &opp_move_cnt);
+
+        if (opp_move_cnt == 0) {
+            // 상대가 둘 수 없으면 바로 평가
+            int eval = score_piece_count(board1, player);
+            if (eval > best_eval) {
+                best_eval = eval;
+                best_idx = i;
+            }
+            continue;
+        }
+
+        // 상대편 그리디: flips*1000 − corner_penalty*500 − dist_center*10
+        int opp_best_j = 0;
+        int opp_best_score = INT_MIN;
+        for (int j = 0; j < opp_move_cnt; j++) {
+            Move om = opp_moves[j];
+            int flips2 = count_flipped(board1, om, oppo);
+            int corner_pen2 = is_corner_adjacent(om.r2, om.c2) ? 1 : 0;
+            float dr2 = fabsf((float)om.r2 - 3.5f);
+            float dc2 = fabsf((float)om.c2 - 3.5f);
+            float dist_center2 = dr2 + dc2;
+            int score2 = flips2 * 1000 - corner_pen2 * 500 - (int)(dist_center2 * 10.0f);
+            if (score2 > opp_best_score) {
+                opp_best_score = score2;
+                opp_best_j = j;
+            }
+        }
+
+        // (C) 상대 수 적용
+        char board2[SIZE][SIZE];
+        simulate_move(board1, opp_moves[opp_best_j], oppo, board2);
+
+        // (D) 최종 평가: 말 개수 차이
+        int eval = score_piece_count(board2, player);
+        if (eval > best_eval) {
+            best_eval = eval;
+            best_idx = i;
+        }
+    }
     
-        int threats = 0; // 상대의 위협이 있는 수
-        // 상대가 행동할 때, 내가 둔 곳을 차지할 위협이 적은 칸인지 확인
-        for (int dr = -1; dr <= 1; dr++) {
-            for (int dc = -1; dc <= 1; dc++) {
-                if (dr == 0 && dc == 0) continue;
-                int nr = r2 + dr, nc = c2 + dc; // 이동한 칸 주변
-                // 이동한 칸 주변에 내 말이 많고 상대가 그 곳에 말을 두었을 때, 내 말이 많이 뺏기는 칸인지 확인
-                if (!IN_BOARD(nr, nc)) continue;
-                BOOL found = FALSE;
-                for (int k = 0; k < valid_moves_cnt_opp; k++) {
-                    Move* opp_move = &opp_valid_moves[k];
-                    if (opp_move->r2 == nr && opp_move->c2 == nc) {
-                        found = TRUE;
-                        break;
+    new_move.c1 = moves[best_idx].r1 + 1;
+    new_move.r1 = moves[best_idx].c1 + 1;
+    new_move.c2 = moves[best_idx].r2 + 1;
+    new_move.r2 = moves[best_idx].c2 + 1;
+
+    return new_move;
+}
+// (2) get_all_valid_moves: 모든 유효 Move(C or J) 수집
+void get_all_valid_moves(const tile board[SIZE][SIZE], char player,
+                        Move moves[], int *move_count) {
+    int cnt = 0;
+    for (int r = 0; r < SIZE; r++) {
+        for (int c = 0; c < SIZE; c++) {
+            if (board[r][c] != player) continue;
+
+            // (A) Clone (거리 1)
+            for (int dr = -1; dr <= 1; dr++) {
+                for (int dc = -1; dc <= 1; dc++) {
+                    if (dr == 0 && dc == 0) continue;
+                    int nr = r + dr;
+                    int nc = c + dc;
+                    if (!IN_BOUNDS(nr, nc)) continue;
+                    if (board[nr][nc] != '.') continue;
+                    if (cnt < 1000) {
+                        moves[cnt].r1 = r;
+                        moves[cnt].c1 = c;
+                        moves[cnt].r2 = nr;
+                        moves[cnt].c2 = nc;
+                        moves[cnt].type = 'C';
+                        cnt++;
                     }
                 }
-                if (!found) continue; // 상대의 유효한 이동에 포함되지 않는지 확인
-                else threats ++;
-                for (int ddr = -1; ddr <= 1; ddr++) {
-                    for (int ddc = -1; ddc <= 1; ddc++) {
-                        if (ddr == 0 && ddc == 0) continue;
-                        int nnr = nr + ddr, nnc = nc + ddc; // 주변 칸
-                        if (!IN_BOARD(nnr, nnc)) continue;
-                        if (nnr == r2 && nnc == c2) continue; // 이동한 칸은 제외
-                        if (board[nnr][nnc] == player) {
-                            threats ++; // 내 말을 뒤집을 수 있는 칸이 있다면 점수 감소
+            }
+
+            // (B) Jump (거리 2: 대각선 포함)
+            for (int dr = -2; dr <= 2; dr++) {
+                for (int dc = -2; dc <= 2; dc++) {
+                    if (dr == 0 && dc == 0) continue;
+                    int adr = abs(dr), adc = abs(dc);
+                    if ((adr == 2 && adc == 0) ||
+                        (adr == 0 && adc == 2) ||
+                        (adr == 2 && adc == 2)) {
+                        int nr = r + dr;
+                        int nc = c + dc;
+                        if (!IN_BOUNDS(nr, nc)) continue;
+                        if (board[nr][nc] != '.') continue;
+                        if (cnt < 1000) {
+                            moves[cnt].r1 = r;
+                            moves[cnt].c1 = c;
+                            moves[cnt].r2 = nr;
+                            moves[cnt].c2 = nc;
+                            moves[cnt].type = 'J';
+                            cnt++;
                         }
                     }
                 }
             }
         }
-        // 내가 마지막 수를 둘 수 있는지 확인
-        int remaining_moves = 0; // 남은 칸의 개수
-        for (int r = 0; r < SIZE; r++) {
-            for (int c = 0; c < SIZE; c++) {
-                if (board[r][c] == '.') {
-                    remaining_moves++;
-                }
-            }
-        }
-        if (remaining_moves <= 3){    
-            if (remaining_moves % 2 == 0) {
-                // 남은 칸이 짝수이면 jump 전략
-                if (pres_move == 0) {
-                    // 현재 수가 clone 전략이면 점수 감소
-                    score[i] -= 0; // jump 전략으로 점수 감소
-                }
-                else if (pres_move == 1) {
-                    // 현재 수가 jump 전략이면 점수 증가
-                    score[i] += 10; // jump 전략으로 점수 증가
-                }
-            } else {
-                // 남은 칸이 홀수이면 clone 전략
-                if (pres_move == 1) {
-                    // 현재 수가 jump 전략이면 점수 감소
-                    score[i] -= 0; // clone 전략으로 점수 감소
-                }
-                else if (pres_move == 0) {
-                    // 현재 수가 clone 전략이면 점수 증가
-                    score[i] += 10; // clone 전략으로 점수 증가
-                }
-            }
-        }
-        // 점수 계산
-        int a,b,c,d;
-        a = 1;
-        b = 2;
-        c = 1;
-        score[i] += a * center_score + b * flips - c * threats;
-        // 최대의 효율을 가지는 수 찾기
+    }
+    *move_count = cnt;
+}
+int count_flipped(const tile board[SIZE][SIZE], Move m, char player) {
+    int count = 0;
+    char opp = (player == 'R' ? 'B' : 'R');
+    int dr = m.r2, dc = m.c2;
 
-        if (score[i] > max_score) {
-            max_score = score[i];
-            best_move = *m; // 현재 수가 가장 좋은 수로 업데이트
+    for (int ddr = -1; ddr <= 1; ddr++) {
+        for (int ddc = -1; ddc <= 1; ddc++) {
+            if (ddr == 0 && ddc == 0) continue;
+            int nr = dr + ddr;
+            int nc = dc + ddc;
+            if (!IN_BOUNDS(nr, nc)) continue;
+            if (board[nr][nc] == opp) count++;
         }
     }
-    
-    new_move.c1 = best_move.r1 + 1;
-    new_move.r1 = best_move.c1 + 1;
-    new_move.c2 = best_move.r2 + 1;
-    new_move.r2 = best_move.c2 + 1;
-
-    return new_move;
+    return count;
 }
-Move* available_move_player(const tile board[SIZE][SIZE], const BOOL player) {
-    // 초기화
-    valid_moves_cnt_player = 0;
-
+int is_corner_adjacent(int r, int c) {
+    if ((r == 0 && c == 1) || (r == 1 && c == 0) || (r == 1 && c == 1)) return 1;
+    if ((r == 0 && c == 6) || (r == 1 && c == 7) || (r == 1 && c == 6)) return 1;
+    if ((r == 6 && c == 0) || (r == 7 && c == 1) || (r == 6 && c == 1)) return 1;
+    if ((r == 6 && c == 7) || (r == 7 && c == 6) || (r == 6 && c == 6)) return 1;
+    return 0;
+}
+int score_piece_count(const tile board[SIZE][SIZE], char player) {
+    int mycnt = 0, oppcnt = 0;
+    char opp = (player == 'R' ? 'B' : 'R');
     for (int r = 0; r < SIZE; r++) {
         for (int c = 0; c < SIZE; c++) {
-            if (board[r][c] != player) continue;
-            
-            // 가능한 수를 저장
-            for (int dr = -2; dr <= 2; dr++) {
-                for (int dc = -2; dc <= 2; dc++) {
-                    if (dr == 0 && dc == 0) continue;
-                    int nr = r + dr, nc = c + dc;
-                    if (!IN_BOARD(nr, nc)) continue;
-                    if (board[nr][nc] != '.') continue;
-                    int adx = abs(dr), ady = abs(dc);
-                    if ((adx <= 1 && ady <= 1 && (adx != 0 || ady != 0)) ||
-                        (adx == 2 && ady == 0) ||
-                        (adx == 0 && ady == 2) ||
-                        (adx == 2 && ady == 2)) {
-                        valid_moves_player[valid_moves_cnt_player++] = (Move){r, c, nr, nc};
-                    }
-                }
-            }
+            if (board[r][c] == player)       mycnt++;
+            else if (board[r][c] == opp)     oppcnt++;
         }
     }
-    // printf("%d\n", valid_moves_cnt_player);
-    return valid_moves_player;
-}
-Move* available_move_opp(const tile board[SIZE][SIZE], const BOOL player) {
-    // 초기화
-    valid_moves_cnt_opp = 0;
-
-    for (int r = 0; r < SIZE; r++) {
-        for (int c = 0; c < SIZE; c++) {
-            if (board[r][c] != player) continue;
-            
-            // 가능한 수를 저장
-            for (int dr = -2; dr <= 2; dr++) {
-                for (int dc = -2; dc <= 2; dc++) {
-                    if (dr == 0 && dc == 0) continue;
-                    int nr = r + dr, nc = c + dc;
-                    if (!IN_BOARD(nr, nc)) continue;
-                    if (board[nr][nc] != '.') continue;
-                    int adx = abs(dr), ady = abs(dc);
-                    if ((adx <= 1 && ady <= 1 && (adx != 0 || ady != 0)) ||
-                        (adx == 2 && ady == 0) ||
-                        (adx == 0 && ady == 2) ||
-                        (adx == 2 && ady == 2)) {
-                        valid_moves_opp[valid_moves_cnt_opp++] = (Move){r, c, nr, nc};
-                    }
-                }
-            }
-        }
-    }
-    // printf("%d\n", valid_moves_cnt_opp);
-    return valid_moves_opp;
+    return mycnt - oppcnt;
 }
 #pragma region FUNC_SOCKET
 int send_stream(const int dst, char* data) {
@@ -558,6 +576,41 @@ json recv_stream(const int src) // string -> json
     }
     
     return payload_json;
+}
+void simulate_move(const tile src_board[SIZE][SIZE], Move m,
+                    char player, tile dest_board[SIZE][SIZE]) {
+    // 보드 복사
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            dest_board[i][j] = src_board[i][j];
+        }
+    }
+
+    int sr = m.r1, sc = m.c1;
+    int dr = m.r2, dc = m.c2;
+
+    if (m.type == 'C') {
+        // Clone: 출발 지점 남기고 도착 지점에 생성
+        dest_board[dr][dc] = player;
+    } else {
+        // Jump: 출발 지점 말 제거, 도착 지점에 생성
+        dest_board[sr][sc] = '.';
+        dest_board[dr][dc] = player;
+    }
+
+    // Flip: 도착 지점 주변 8방향 상대 말을 뒤집음
+    char opp = (player == 'R' ? 'B' : 'R');
+    for (int ddr = -1; ddr <= 1; ddr++) {
+        for (int ddc = -1; ddc <= 1; ddc++) {
+            if (ddr == 0 && ddc == 0) continue;
+            int nr = dr + ddr;
+            int nc = dc + ddc;
+            if (!IN_BOUNDS(nr, nc)) continue;
+            if (dest_board[nr][nc] == opp) {
+                dest_board[nr][nc] = player;
+            }
+        }
+    }
 }
 #pragma endregion
 
@@ -679,6 +732,8 @@ void print_board(const tile board[SIZE][SIZE]) {
         printf("\n");
     }
 
-    render(board);
+    #ifndef CLIENT_ONLY
+        render(board);
+    #endif
 }
 #pragma endregion

@@ -1,3 +1,5 @@
+CC      := gcc
+CFLAGS  := 
 LDFLAGS := -ljansson
 
 DEBUG_FLAGS   := -DDEBUG
@@ -9,13 +11,14 @@ ASAN_FLAGS    := -g -O0 -fsanitize=address
 all: release
 
 release:
-	sudo g++ -I. -I./include client.c board.c -L./lib -lpthread -lrgbmatrix -lrt -o client $(LDFLAGS)
+	$(CC) $(CFLAGS) client.c board.c -o client $(LDFLAGS)
 
 debug:
-	sudo g++ -I. -I./include client.c board.c -L./lib -lpthread -lrgbmatrix -lrt -o client $(LDFLAGS) $(DEBUG_FLAGS)
+	$(CC) $(CFLAGS) client.c board.c -o client $(LDFLAGS) $(DEBUG_FLAGS)
 
 test:
-	sudo g++ ${ASAN_FLAGS} -I. -I./include client.c board.c -L./lib -lpthread -lrgbmatrix -lrt -o client $(LDFLAGS) -lpthread $(DEBUG_FLAGS)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) client.c board.c -o client $(LDFLAGS) -lpthread $(DEBUG_FLAGS)
+
 
 run:
 	@./client -ip 10.8.128.233 -port 8080 -username sujaehado

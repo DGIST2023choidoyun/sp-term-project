@@ -41,29 +41,9 @@
 extern "C" {
 #endif
 
-/**
- * init_led_matrix()
- *   Raspberry Pi에 연결된 RGB LED 매트릭스를 초기화합니다.
- *   연결된 하드웨어가 없거나 초기화 실패 시 0을 리턴, 성공 시 1을 리턴합니다.
- *
- *   반드시 프로그램 시작 시 한 번만 호출해야 합니다.
- */
-int init_led_matrix(void);
+bool init_led_panel(void);
 
-/**
- * display_board_on_led(board)
- *   8×8 char 배열(board)을 받아서, 연결된 RGB LED 매트릭스에 그려줍니다.
- *   
- *   board[r][c] 값이:
- *     'R' → 빨간색 블록,
- *     'B' → 파란색 블록,
- *     '.' → 검은색(꺼짐) 블록
- *   으로 매핑되어, 예를 들어 32×32 물리 매트릭스라면
- *   각 셀을 4×4 LED 픽셀 블록으로 칠하여 총 8×8 → 32×32로 확대해 표시합니다.
- *
- *   init_led_matrix() 호출이 성공한 뒤에만 동작합니다. 
- */
-void display_board_on_led(char board[8][8]);
+void render(const char board[8][8]);
 
 /**
  * deinit_led_matrix()

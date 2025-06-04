@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <signal.h>
 #include <time.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -8,6 +9,7 @@
 #include <unistd.h>
 #include <jansson.h>
 
+#include "board.h"
 #include "led-matrix-c.h"
 
 #pragma region MACRO_UTIL
@@ -99,6 +101,10 @@ char* build_payload(PAYLOAD, ...);
 char* stringfy(json*);
 json json_undefined();
 
+void handle_signal(int signum) {
+    deinit_led_matrix();
+    exit(0);
+}
 
 #pragma region MAIN
 int main(int argc, char* argv[]) {
@@ -113,6 +119,9 @@ int main(int argc, char* argv[]) {
 
     int socket;
     STATUS status;
+
+    signal(SIGINT, handle_signal);   // Ctrl+C
+    signal(SIGTERM, handle_signal);  // kill 명령 등
 
     if (!set_network(ip, port, &socket, &status)) {
         ERR("[netset error]\n");
@@ -669,5 +678,7 @@ void print_board(const tile board[SIZE][SIZE]) {
         }
         printf("\n");
     }
+
+    render(board);
 }
 #pragma endregion

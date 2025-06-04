@@ -26,6 +26,6 @@ clean:
 	rm -f client
 
 board:
-	g++ -I. -I./include -L./lib board.c -lpthread -lrgbmatrix -lrt -o board
+	g++ -DSTANDALONE -I. -I./include -L./lib board.c -lpthread -lrgbmatrix -lrt -o board
 run_board:
 	sudo ./board

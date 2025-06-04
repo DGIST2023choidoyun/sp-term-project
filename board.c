@@ -47,7 +47,11 @@ bool init_led_panel() {
 }
 
 void deinit_led_matrix(void) {
-    // TODO
+    if (matrix) {
+        led_matrix_delete(matrix);
+        matrix = NULL;
+        canvas = NULL;
+    }
 }
 
 void render(const char board[BOARD_SIZE][BOARD_SIZE]) {

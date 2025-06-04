@@ -10,7 +10,6 @@
 #include <jansson.h>
 
 #include "board.h"
-#include "led-matrix-c.h"
 
 #pragma region MACRO_UTIL
 #define SELECT_ARITIES(_1,_2,_3,_4,FUNC,...)    FUNC
@@ -134,6 +133,7 @@ int main(int argc, char* argv[]) {
     }
     
     close(socket);
+    deinit_led_matrix();
     return 0;
 }
 #pragma endregion

@@ -65,11 +65,11 @@ typedef enum { READY, REGISTERED, WAIT_TURN, WAIT_MOVE_ACK } STATUS;
 typedef enum { REGISTER, MOVE }                       PAYLOAD;
 typedef struct pollfd                           s_pollfd;
 typedef struct addrinfo                         s_addrinfo;
-typedef char                                    bool;
+typedef char                                    BOOL;
 typedef char                                    tile;
 typedef struct {
     json_t*             data; // real json object
-    bool                ref; // referred or not
+    BOOL                ref; // referred or not
 } json;
 typedef struct { int r1, c1, r2, c2; } Move;
 #pragma endregion
@@ -83,13 +83,13 @@ int valid_moves_cnt_opp = 0;
 void frees(int, ...);
 void free_json(json*);
 void free_jsons(int, ...);
-bool execution_check(int argc, char* argv[], const char** pip, const char** pport, const char** pname);
+BOOL execution_check(int argc, char* argv[], const char** pip, const char** pport, const char** pname);
 void print_board(const tile board[SIZE][SIZE]);
 
-bool set_network(const char* ip, const char* port, int* server, STATUS* status);
-bool register_player(const int server, const char* username, STATUS* status);
-bool game_start(const int server, const char* username, bool* out_is_first, STATUS* status);
-bool process(int sockfd, const char* username, STATUS* status);
+BOOL set_network(const char* ip, const char* port, int* server, STATUS* status);
+BOOL register_player(const int server, const char* username, STATUS* status);
+BOOL game_start(const int server, const char* username, BOOL* out_is_first, STATUS* status);
+BOOL process(int sockfd, const char* username, STATUS* status);
 Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile oppo);
 Move* available_move_player(const tile board[SIZE][SIZE], const tile player);
 Move* available_move_opp(const tile board[SIZE][SIZE], const tile player);
@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
 }
 #pragma endregion
 
-bool set_network(const char* ip, const char* port, int* server, STATUS* game_status) {
+BOOL set_network(const char* ip, const char* port, int* server, STATUS* game_status) {
     s_addrinfo hints, *res;
     int status;
 
@@ -167,11 +167,11 @@ bool set_network(const char* ip, const char* port, int* server, STATUS* game_sta
     freeaddrinfo(res);
     return TRUE;
 }
-bool register_player(const int server, const char* username, STATUS* status) {
+BOOL register_player(const int server, const char* username, STATUS* status) {
     if (*status != READY)
         return FALSE;
 
-    bool ret = FALSE;
+    BOOL ret = FALSE;
     char* payload = build_payload(REGISTER, username);
 
     int len = send_stream(server, payload);
@@ -193,11 +193,11 @@ bool register_player(const int server, const char* username, STATUS* status) {
     free(payload);
     return ret;
 }
-bool game_start(const int server, const char* username, bool* out_is_first, STATUS* status) {
+BOOL game_start(const int server, const char* username, BOOL* out_is_first, STATUS* status) {
     if (*status != REGISTERED)
         return FALSE;
 
-    bool ret = FALSE;
+    BOOL ret = FALSE;
     char *type = NULL, *first_player = NULL;
     char* players[2];
     json resp = recv_stream(server);
@@ -214,8 +214,8 @@ bool game_start(const int server, const char* username, bool* out_is_first, STAT
     __FREE_JSON(resp);
     return ret;
 }
-bool process(int sockfd, const char* username, STATUS* status) {
-    bool is_first;
+BOOL process(int sockfd, const char* username, STATUS* status) {
+    BOOL is_first;
     s_pollfd server = { .fd = sockfd, .events = POLLIN };
 
     if (game_start(sockfd, username, &is_first, status)) {
@@ -376,7 +376,7 @@ Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile o
                 int nr = r2 + dr, nc = c2 + dc; // 이동한 칸 주변
                 // 이동한 칸 주변에 내 말이 많고 상대가 그 곳에 말을 두었을 때, 내 말이 많이 뺏기는 칸인지 확인
                 if (!IN_BOARD(nr, nc)) continue;
-                bool found = false;
+                BOOL found = false;
                 for (int k = 0; k < valid_moves_cnt_opp; k++) {
                     Move* opp_move = &opp_valid_moves[k];
                     if (opp_move->r2 == nr && opp_move->c2 == nc) {
@@ -452,7 +452,7 @@ Move move_generate(const tile board[SIZE][SIZE], const tile player, const tile o
 
     return new_move;
 }
-Move* available_move_player(const tile board[SIZE][SIZE], const bool player) {
+Move* available_move_player(const tile board[SIZE][SIZE], const BOOL player) {
     // 초기화
     valid_moves_cnt_player = 0;
 
@@ -481,7 +481,7 @@ Move* available_move_player(const tile board[SIZE][SIZE], const bool player) {
     // printf("%d\n", valid_moves_cnt_player);
     return valid_moves_player;
 }
-Move* available_move_opp(const tile board[SIZE][SIZE], const bool player) {
+Move* available_move_opp(const tile board[SIZE][SIZE], const BOOL player) {
     // 초기화
     valid_moves_cnt_opp = 0;
 
@@ -652,7 +652,7 @@ void free_jsons(int num, ...) {
     }
     va_end(ap);
 }
-bool execution_check(int argc, char* argv[], const char** pip, const char** pport, const char** pname) {
+BOOL execution_check(int argc, char* argv[], const char** pip, const char** pport, const char** pname) {
     // argv[0]: program name
     if (argc != 7)
         return FALSE;
